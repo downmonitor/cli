@@ -35,6 +35,33 @@ func TestNoColorMeansNoEscapeCode(t *testing.T) {
 	}
 }
 
+func TestADisabledSpinnerWritesNothing(t *testing.T) {
+	var out []byte
+
+	spinner := NewSpinner(writerFunc(func(p []byte) (int, error) {
+		out = append(out, p...)
+
+		return len(p), nil
+	}), false, true)
+
+	spinner.Start("checking")
+	spinner.Update("still checking")
+	spinner.Stop()
+	spinner.Stop()
+
+	if len(out) != 0 {
+		t.Errorf("a disabled spinner wrote %q", out)
+	}
+
+	var none *Spinner
+	none.Start("nil is safe")
+	none.Stop()
+}
+
+type writerFunc func([]byte) (int, error)
+
+func (f writerFunc) Write(p []byte) (int, error) { return f(p) }
+
 func TestPlural(t *testing.T) {
 	for count, want := range map[int]string{0: "0 checks", 1: "1 check", 3: "3 checks"} {
 		if got := Plural(count, "check"); got != want {
