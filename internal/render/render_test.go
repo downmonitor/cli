@@ -3,6 +3,7 @@ package render
 import (
 	"bytes"
 	"encoding/json"
+	"encoding/xml"
 	"os"
 	"path/filepath"
 	"strings"
@@ -113,6 +114,88 @@ func TestNDJSONIsOneLine(t *testing.T) {
 	}
 }
 
+func TestJUnitFailsARegionThatIsDownAndSkipsOneNotMeasured(t *testing.T) {
+	check := load(t)
+	down := "down"
+	check.Regions[0].Verdict = &down
+	check.Regions[0].Error = &api.ReadingErr{Code: "CONNECTION_REFUSED", Message: "connection refused"}
+	check.Regions[1].Measured = false
+	check.Regions[1].Error = &api.ReadingErr{Code: "not_measured", Message: "No reading came back from there."}
+	check.FailedAssertions = []api.Assertion{{Region: "cdg", Type: "status", Expected: "2xx", Actual: "503"}}
+
+	out := render(t, JUnit, check)
+
+	var suites struct {
+		Tests    int `xml:"tests,attr"`
+		Failures int `xml:"failures,attr"`
+		Suites   []struct {
+			Skipped int `xml:"skipped,attr"`
+			Cases   []struct {
+				Name    string `xml:"name,attr"`
+				Failure *struct {
+					Message string `xml:"message,attr"`
+				} `xml:"failure"`
+				Skipped *struct{} `xml:"skipped"`
+			} `xml:"testcase"`
+		} `xml:"testsuite"`
+	}
+
+	if err := xml.Unmarshal([]byte(out), &suites); err != nil {
+		t.Fatalf("not XML: %v\n%s", err, out)
+	}
+
+	// Three regions and one assertion: the down region and the assertion
+	// fail, the unmeasured region is skipped.
+	if suites.Tests != 4 {
+		t.Errorf("tests = %d, want 4", suites.Tests)
+	}
+
+	if suites.Failures != 2 {
+		t.Errorf("failures = %d, want 2", suites.Failures)
+	}
+
+	if suites.Suites[0].Skipped != 1 {
+		t.Errorf("skipped = %d, want 1", suites.Suites[0].Skipped)
+	}
+}
+
+func TestGitHubAnnotatesEveryFailure(t *testing.T) {
+	check := load(t)
+	down := "down"
+	check.Regions[0].Verdict = &down
+	check.FailedAssertions = []api.Assertion{{Region: "cdg", Type: "status", Expected: "2xx", Actual: "503"}}
+
+	out := render(t, GitHub, check)
+
+	if !strings.Contains(out, "::error title=cdg is down::") {
+		t.Errorf("no annotation for the region:\n%s", out)
+	}
+
+	if !strings.Contains(out, "::error title=Assertion failed::") {
+		t.Errorf("no annotation for the assertion:\n%s", out)
+	}
+
+	if !strings.Contains(out, "| region | status |") {
+		t.Error("the table is missing from the log")
+	}
+}
+
+func TestMarkdownIsATableSomeoneCanPaste(t *testing.T) {
+	out := render(t, Markdown, load(t))
+
+	if !strings.HasPrefix(out, "**https://api.acme.com/v1/health**") {
+		t.Errorf("no title:\n%s", out)
+	}
+
+	if strings.Count(out, "\n| ") < 4 {
+		t.Errorf("the table has too few rows:\n%s", out)
+	}
+
+	if !strings.Contains(out, "<sub>3 checks billed") {
+		t.Errorf("the cost line is missing:\n%s", out)
+	}
+}
+
 func TestQuietRendersNothingInEveryFormat(t *testing.T) {
 	for _, format := range Formats {
 		var out bytes.Buffer
@@ -187,6 +270,22 @@ func stripEscapes(text string) string {
 	}
 
 	return out.String()
+}
+
+func TestGitHubWritesTheStepSummary(t *testing.T) {
+	summary := filepath.Join(t.TempDir(), "summary.md")
+	t.Setenv("GITHUB_STEP_SUMMARY", summary)
+
+	render(t, GitHub, load(t))
+
+	written, err := os.ReadFile(summary)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !strings.Contains(string(written), "| region | status |") {
+		t.Errorf("summary = %q", written)
+	}
 }
 
 func TestHeaderHidesDisagreeingStatusCodes(t *testing.T) {

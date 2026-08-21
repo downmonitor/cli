@@ -20,13 +20,16 @@ type Format string
 
 // Supported output formats.
 const (
-	Table  Format = "table"
-	JSON   Format = "json"
-	NDJSON Format = "ndjson"
+	Table    Format = "table"
+	JSON     Format = "json"
+	NDJSON   Format = "ndjson"
+	JUnit    Format = "junit"
+	GitHub   Format = "github"
+	Markdown Format = "markdown"
 )
 
 // Formats lists every supported format, in the order they are documented.
-var Formats = []Format{Table, JSON, NDJSON}
+var Formats = []Format{Table, JSON, NDJSON, JUnit, GitHub, Markdown}
 
 // ParseFormat parses a --output value, case-insensitively.
 func ParseFormat(value string) (Format, error) {
@@ -73,6 +76,12 @@ func Check(w io.Writer, format Format, check *api.Check, options Options) error 
 		return writeJSON(w, check)
 	case NDJSON:
 		return writeNDJSON(w, check)
+	case JUnit:
+		return writeJUnit(w, check)
+	case GitHub:
+		return writeGitHub(w, check)
+	case Markdown:
+		return writeMarkdown(w, check)
 	default:
 		return writeTable(w, check, options)
 	}
@@ -96,6 +105,10 @@ func ms(value *int) string {
 	}
 
 	return strconv.Itoa(*value) + "ms"
+}
+
+func place(region api.RegionReading) string {
+	return region.Region + " " + region.Name
 }
 
 func status(region api.RegionReading) string {
