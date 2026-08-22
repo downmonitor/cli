@@ -1,0 +1,59 @@
+package cli
+
+import (
+	"reflect"
+	"testing"
+
+	"github.com/downmonitor/cli/internal/api"
+)
+
+func TestParseHeaders(t *testing.T) {
+	headers, err := parseHeaders([]string{"X-One: 1", "X-Two:two: parts", "Empty:"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	want := map[string]string{"X-One": "1", "X-Two": "two: parts", "Empty": ""}
+	if !reflect.DeepEqual(headers, want) {
+		t.Errorf("headers = %v", headers)
+	}
+
+	for _, invalid := range []string{"no colon", ": value"} {
+		if _, err := parseHeaders([]string{invalid}); err == nil {
+			t.Errorf("%q was accepted", invalid)
+		}
+	}
+}
+
+func TestContinentCode(t *testing.T) {
+	for input, want := range map[string]string{
+		"EU": "EU", "europe": "EU", "North America": "NA", "south-america": "SA", "oc": "OC",
+	} {
+		if got, ok := continentCode(input); !ok || got != want {
+			t.Errorf("continentCode(%q) = %q, %v", input, got, ok)
+		}
+	}
+
+	if _, ok := continentCode("atlantis"); ok {
+		t.Error("atlantis is not a continent")
+	}
+}
+
+func TestDescribeWhere(t *testing.T) {
+	tests := []struct {
+		request api.CheckRequest
+		want    string
+	}{
+		{api.CheckRequest{}, "from regions picked automatically"},
+		{api.CheckRequest{Count: 3}, "from 3 regions picked automatically"},
+		{api.CheckRequest{Regions: []string{"cdg", "nyc"}}, "from cdg, nyc"},
+		{api.CheckRequest{Regions: "tier1"}, "from tier1 regions"},
+		{api.CheckRequest{Countries: []string{"FR"}, Count: 1}, "from 1 region in FR"},
+	}
+
+	for _, tt := range tests {
+		if got := describeWhere(tt.request); got != tt.want {
+			t.Errorf("describeWhere(%+v) = %q, want %q", tt.request, got, tt.want)
+		}
+	}
+}
