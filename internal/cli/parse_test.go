@@ -37,6 +37,28 @@ func TestParseJSONAssertion(t *testing.T) {
 	}
 }
 
+func TestAllowance(t *testing.T) {
+	tests := map[string]float64{
+		"50%":   300,
+		"1.5x":  300,
+		"300ms": 500,
+		"0%":    200,
+	}
+
+	for spec, want := range tests {
+		got, err := allowance(200, spec)
+		if err != nil || got != want {
+			t.Errorf("allowance(200, %q) = %v, %v; want %v", spec, got, err, want)
+		}
+	}
+
+	for _, spec := range []string{"", "fast", "50", "-10%", "x", "1.5"} {
+		if _, err := allowance(200, spec); err == nil {
+			t.Errorf("allowance(200, %q) was accepted", spec)
+		}
+	}
+}
+
 func TestParseHeaders(t *testing.T) {
 	headers, err := parseHeaders([]string{"X-One: 1", "X-Two:two: parts", "Empty:"})
 	if err != nil {

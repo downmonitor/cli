@@ -544,6 +544,38 @@ func TestSaveWritesTheReadingAndIDFetchesItBack(t *testing.T) {
 	}
 }
 
+func TestBaselineFailsOnTheRegressionRatherThanTheNumber(t *testing.T) {
+	baseline := filepath.Join(t.TempDir(), "last-good.json")
+
+	if err := os.WriteFile(baseline, withP95(t, 200), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// 871ms against a 200ms baseline is more than 50% slower.
+	server := serve(t, http.StatusCreated, fixture(t, "check_up.json"))
+
+	code, _, stderr := run(t, "check", "https://api.acme.com",
+		"--baseline", baseline, "--max-regression", "50%",
+		"--api-url", server.URL, "--key", "dm_live_test")
+
+	if code != exitcode.Verdict {
+		t.Fatalf("exit code = %d, want %d", code, exitcode.Verdict)
+	}
+
+	if !strings.Contains(stderr, "p95 went from") {
+		t.Errorf("the regression is not explained:\n%s", stderr)
+	}
+
+	// A larger allowance passes.
+	code, _, _ = run(t, "check", "https://api.acme.com",
+		"--baseline", baseline, "--max-regression", "10x",
+		"--api-url", server.URL, "--key", "dm_live_test")
+
+	if code != exitcode.OK {
+		t.Fatalf("exit code = %d, want 0", code)
+	}
+}
+
 func TestMaxP95FailsTheCheckWithoutTouchingTheVerdict(t *testing.T) {
 	server := serve(t, http.StatusCreated, fixture(t, "check_up.json"))
 
@@ -649,6 +681,34 @@ func TestFailOnTLSExpiring(t *testing.T) {
 
 	if code != exitcode.Verdict {
 		t.Fatalf("exit code = %d, want %d", code, exitcode.Verdict)
+	}
+}
+
+func TestAMissingBaselineIsTheFirstRun(t *testing.T) {
+	server := serve(t, http.StatusCreated, fixture(t, "check_up.json"))
+	baseline := filepath.Join(t.TempDir(), "missing.json")
+
+	code, _, stderr := run(t, "check", "https://api.acme.com", "--baseline", baseline, "--max-regression", "10%",
+		"--api-url", server.URL, "--key", "dm_live_test")
+
+	if code != exitcode.OK {
+		t.Fatalf("exit code = %d: %s", code, stderr)
+	}
+}
+
+func TestAnInvalidBaselineIsAUsageError(t *testing.T) {
+	server := serve(t, http.StatusCreated, fixture(t, "check_up.json"))
+	baseline := filepath.Join(t.TempDir(), "baseline.json")
+
+	if err := os.WriteFile(baseline, []byte("not json"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	code, _, _ := run(t, "check", "https://api.acme.com", "--baseline", baseline, "--max-regression", "10%",
+		"--api-url", server.URL, "--key", "dm_live_test")
+
+	if code != exitcode.Usage {
+		t.Fatalf("exit code = %d, want %d", code, exitcode.Usage)
 	}
 }
 

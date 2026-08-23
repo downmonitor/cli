@@ -3,6 +3,7 @@ package cli
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"strconv"
@@ -59,10 +60,12 @@ type checkFlags struct {
 	maxP95        int
 	tlsMinDays    int
 
-	failOn   string
-	failOpen bool
-	save     string
-	id       string
+	failOn        string
+	failOpen      bool
+	save          string
+	id            string
+	baseline      string
+	maxRegression string
 
 	// file holds the project defaults from .downmonitor.yml, used for anything
 	// no flag sets.
@@ -184,13 +187,16 @@ func bindCheckFlags(cmd *cobra.Command, f *checkFlags) {
 	flags.BoolVar(&f.failOpen, "fail-open", false, "Exit 0 with a warning instead of 3 when nothing could be checked")
 	flags.StringVar(&f.save, "save", "", "Also write the full result as JSON to this file")
 	flags.StringVar(&f.id, "id", "", "Fetch a previous check by id instead of running one")
+	flags.StringVar(&f.baseline, "baseline", "", "A result saved with --save to compare the p95 against")
+	flags.StringVar(&f.maxRegression, "max-regression", "", "Allowed p95 regression over --baseline: 50%, 1.5x or 300ms")
 
 	inSection(flags, sectionWhere, "regions", "country", "continent", "count", "exclude")
 	inSection(flags, sectionRequest, "method", "header", "data", "json", "basic", "bearer", "resolve",
 		"follow", "no-follow", "timeout", "ipv4", "ipv6", "insecure", "user-agent")
 	inSection(flags, sectionAssertions, "expect-status", "expect-body", "expect-missing", "expect-json",
 		"expect-header", "max-ttfb", "max-total", "max-p95", "tls-min-days")
-	inSection(flags, sectionVerdict, "confirm", "fail-on", "fail-open", "save", "id")
+	inSection(flags, sectionVerdict, "confirm", "fail-on", "fail-open", "save", "id",
+		"baseline", "max-regression")
 }
 
 // whereFromHelp documents region selection for `check` and `watch`.
@@ -731,6 +737,10 @@ func saveCheck(check *api.Check, path string) error {
 // never overrides the server's verdict; it only decides whether that verdict
 // fails the command.
 func (f *checkFlags) verdict(check *api.Check) error {
+	if err := f.regression(check); err != nil {
+		return err
+	}
+
 	if f.maxP95 > 0 && check.Summary.P95Ms != nil && *check.Summary.P95Ms > f.maxP95 {
 		return exitcode.Verdictf("p95 %dms is above the %dms allowed", *check.Summary.P95Ms, f.maxP95)
 	}
@@ -757,4 +767,73 @@ func (f *checkFlags) verdict(check *api.Check) error {
 	}
 
 	return exitcode.Verdictf("%s is %s", check.Target, check.Verdict)
+}
+
+// regression compares the p95 with the one of a saved baseline. A missing
+// baseline file is not an error, so the first run of a pipeline can create it.
+func (f *checkFlags) regression(check *api.Check) error {
+	if f.baseline == "" || f.maxRegression == "" {
+		return nil
+	}
+
+	raw, err := os.ReadFile(f.baseline)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+
+	if err != nil {
+		return exitcode.Usagef("could not read the baseline: %w", err)
+	}
+
+	var previous api.Check
+	if err := json.Unmarshal(raw, &previous); err != nil {
+		return exitcode.Usagef("%s is not a saved check result: %w", f.baseline, err)
+	}
+
+	if previous.Summary.P95Ms == nil || check.Summary.P95Ms == nil {
+		return nil
+	}
+
+	before, now := float64(*previous.Summary.P95Ms), float64(*check.Summary.P95Ms)
+
+	allowed, err := allowance(before, f.maxRegression)
+	if err != nil {
+		return exitcode.Usagef("%s", err)
+	}
+
+	if now <= allowed {
+		return nil
+	}
+
+	return exitcode.Verdictf("p95 went from %.0fms to %.0fms, more than the %s allowed", before, now, f.maxRegression)
+}
+
+// allowance returns the highest acceptable p95 given a baseline and a
+// --max-regression of the form 50%, 1.5x or 300ms.
+func allowance(baseline float64, spec string) (float64, error) {
+	spec = strings.TrimSpace(spec)
+	invalid := fmt.Errorf("invalid --max-regression %q: expected a percentage (50%%), a factor (1.5x) or a duration in ms (300ms)", spec)
+
+	parse := func(suffix string) (float64, bool) {
+		value, err := strconv.ParseFloat(strings.TrimSuffix(spec, suffix), 64)
+
+		return value, err == nil && value >= 0
+	}
+
+	switch {
+	case strings.HasSuffix(spec, "%"):
+		if percent, ok := parse("%"); ok {
+			return baseline * (1 + percent/100), nil
+		}
+	case strings.HasSuffix(spec, "ms"):
+		if extra, ok := parse("ms"); ok {
+			return baseline + extra, nil
+		}
+	case strings.HasSuffix(spec, "x"):
+		if factor, ok := parse("x"); ok {
+			return baseline * factor, nil
+		}
+	}
+
+	return 0, invalid
 }
