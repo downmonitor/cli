@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -21,7 +22,7 @@ import (
 const maxRegions = 24
 
 // failOnPolicies are the accepted values of --fail-on.
-var failOnPolicies = []string{"any-region-down", "all-regions-down", "assertion", "never"}
+var failOnPolicies = []string{"any-region-down", "all-regions-down", "assertion", "tls-expiring", "never"}
 
 // checkFlags holds the flags shared by `check` and `watch`. The request flags
 // follow curl's names, so a curl command translates directly.
@@ -48,6 +49,16 @@ type checkFlags struct {
 	exclude    []string
 	confirm    int
 
+	expectStatus  string
+	expectBody    []string
+	expectMissing []string
+	expectJSON    []string
+	expectHeader  []string
+	maxTTFB       int
+	maxTotal      int
+	maxP95        int
+	tlsMinDays    int
+
 	failOn   string
 	failOpen bool
 	save     string
@@ -69,17 +80,18 @@ verdict: 0 up, 1 down, 3 when nothing could be checked.
 
 ` + whereFromHelp + `
 
-The request flags mirror curl: -X, -H, -d, -u, --resolve, -4/-6, --insecure.`,
+The request flags mirror curl: -X, -H, -d, -u, --resolve, -4/-6, --insecure.
+Assertions are evaluated by the probes.`,
 		Example: `  # Two regions, picked among those in service
   downmonitor check https://api.example.com/health
 
   # Named regions, a city, or a country
-  downmonitor check https://api.example.com -r cdg,nyc
+  downmonitor check https://api.example.com -r cdg,nyc --expect-status 200
   downmonitor check https://api.example.com -r paris,singapore
   downmonitor check https://api.example.com --country FR --count 3
 
   # In CI: three regions must agree, and a Downmonitor outage does not fail the build
-  downmonitor check "$DEPLOY_URL" --count 3 --confirm 3 --fail-open`,
+  downmonitor check "$DEPLOY_URL" --count 3 --confirm 3 --max-p95 800 --fail-open`,
 		Args: func(_ *cobra.Command, args []string) error {
 			if f.id != "" && len(args) == 0 {
 				return nil
@@ -158,6 +170,16 @@ func bindCheckFlags(cmd *cobra.Command, f *checkFlags) {
 	flags.StringSliceVar(&f.exclude, "exclude", nil, "Regions to leave out")
 	flags.IntVar(&f.confirm, "confirm", 0, "Number of regions that must agree before the verdict is down")
 
+	flags.StringVar(&f.expectStatus, "expect-status", "", "Expected status: 200, 2xx, 200-204 or a comma-separated list")
+	flags.StringArrayVar(&f.expectBody, "expect-body", nil, "Text the body must contain (repeatable)")
+	flags.StringArrayVar(&f.expectMissing, "expect-missing", nil, "Text the body must not contain (repeatable)")
+	flags.StringArrayVar(&f.expectJSON, "expect-json", nil, `JSONPath assertion, e.g. '$.status == "ok"' (repeatable)`)
+	flags.StringArrayVar(&f.expectHeader, "expect-header", nil, `Response header "Name: value" (repeatable)`)
+	flags.IntVar(&f.maxTTFB, "max-ttfb", 0, "Fail a region whose time to first byte exceeds this many ms")
+	flags.IntVar(&f.maxTotal, "max-total", 0, "Fail a region whose total time exceeds this many ms")
+	flags.IntVar(&f.maxP95, "max-p95", 0, "Fail when the p95 across regions exceeds this many ms")
+	flags.IntVar(&f.tlsMinDays, "tls-min-days", 0, "Fail when the certificate expires in fewer days than this")
+
 	flags.StringVar(&f.failOn, "fail-on", "any-region-down", "When to exit 1: "+strings.Join(failOnPolicies, ", "))
 	flags.BoolVar(&f.failOpen, "fail-open", false, "Exit 0 with a warning instead of 3 when nothing could be checked")
 	flags.StringVar(&f.save, "save", "", "Also write the full result as JSON to this file")
@@ -166,6 +188,8 @@ func bindCheckFlags(cmd *cobra.Command, f *checkFlags) {
 	inSection(flags, sectionWhere, "regions", "country", "continent", "count", "exclude")
 	inSection(flags, sectionRequest, "method", "header", "data", "json", "basic", "bearer", "resolve",
 		"follow", "no-follow", "timeout", "ipv4", "ipv6", "insecure", "user-agent")
+	inSection(flags, sectionAssertions, "expect-status", "expect-body", "expect-missing", "expect-json",
+		"expect-header", "max-ttfb", "max-total", "max-p95", "tls-min-days")
 	inSection(flags, sectionVerdict, "confirm", "fail-on", "fail-open", "save", "id")
 }
 
@@ -320,6 +344,10 @@ func (f *checkFlags) request(raw string) (api.CheckRequest, error) {
 		request.IPVersion = 4
 	case f.ipv6:
 		request.IPVersion = 6
+	}
+
+	if request.Assertions, err = f.assertions(); err != nil {
+		return api.CheckRequest{}, err
 	}
 
 	return request, nil
@@ -556,6 +584,42 @@ func (f *checkFlags) auth() (*api.Auth, error) {
 	return &api.Auth{Type: "bearer", Token: token}, nil
 }
 
+func (f *checkFlags) assertions() (*api.Assertions, error) {
+	assertions := &api.Assertions{
+		Status:       f.expectStatus,
+		BodyContains: f.expectBody,
+		BodyMissing:  f.expectMissing,
+		MaxTTFBMs:    f.maxTTFB,
+		MaxTotalMs:   f.maxTotal,
+		TLSMinDays:   f.tlsMinDays,
+	}
+
+	headers, err := parseHeaders(f.expectHeader)
+	if err != nil {
+		return nil, err
+	}
+
+	assertions.Headers = headers
+
+	for _, rule := range f.expectJSON {
+		parsed, err := parseJSONAssertion(rule)
+		if err != nil {
+			return nil, err
+		}
+
+		assertions.JSON = append(assertions.JSON, parsed)
+	}
+
+	empty := assertions.Status == "" && len(assertions.BodyContains) == 0 && len(assertions.BodyMissing) == 0 &&
+		len(assertions.JSON) == 0 && len(assertions.Headers) == 0 &&
+		assertions.MaxTTFBMs == 0 && assertions.MaxTotalMs == 0 && assertions.TLSMinDays == 0
+	if empty {
+		return nil, nil
+	}
+
+	return assertions, nil
+}
+
 // parseHeaders parses "Name: value" pairs.
 func parseHeaders(values []string) (map[string]string, error) {
 	if len(values) == 0 {
@@ -574,6 +638,62 @@ func parseHeaders(values []string) (map[string]string, error) {
 	}
 
 	return headers, nil
+}
+
+// jsonOperators are the operators of --expect-json, tried in order.
+var jsonOperators = []string{"==", "!=", ">=", "<=", ">", "<", " contains ", " not exists", " exists"}
+
+// parseJSONAssertion parses rules such as `$.order.state == "pending"`,
+// `$.items exists` or a bare `$.id`, which means exists.
+func parseJSONAssertion(rule string) (api.JSONAssertion, error) {
+	trimmed := strings.TrimSpace(rule)
+
+	for _, operator := range jsonOperators {
+		index := strings.Index(trimmed, operator)
+		if index <= 0 {
+			continue
+		}
+
+		op := strings.TrimSpace(operator)
+		assertion := api.JSONAssertion{Path: strings.TrimSpace(trimmed[:index]), Op: op}
+
+		if op != "exists" && op != "not exists" {
+			assertion.Value = jsonValue(strings.TrimSpace(trimmed[index+len(operator):]))
+		}
+
+		return assertion, nil
+	}
+
+	if strings.HasPrefix(trimmed, "$") {
+		return api.JSONAssertion{Path: trimmed, Op: "exists"}, nil
+	}
+
+	return api.JSONAssertion{}, exitcode.Usagef(
+		`invalid --expect-json %q: expected a path and a rule, such as '$.status == "ok"' or '$.items exists'`, rule)
+}
+
+// jsonValue keeps the type of the value as written: a quoted string stays a
+// string, numbers, booleans and null are decoded, and anything else is sent as
+// a string.
+func jsonValue(raw string) any {
+	if len(raw) >= 2 && (raw[0] == '"' || raw[0] == '\'') && raw[len(raw)-1] == raw[0] {
+		return raw[1 : len(raw)-1]
+	}
+
+	switch raw {
+	case "true":
+		return true
+	case "false":
+		return false
+	case "null":
+		return nil
+	}
+
+	if number, err := strconv.ParseFloat(raw, 64); err == nil {
+		return number
+	}
+
+	return raw
 }
 
 // finishCheck prints the result, saves it if requested, and returns the error
@@ -611,6 +731,10 @@ func saveCheck(check *api.Check, path string) error {
 // never overrides the server's verdict; it only decides whether that verdict
 // fails the command.
 func (f *checkFlags) verdict(check *api.Check) error {
+	if f.maxP95 > 0 && check.Summary.P95Ms != nil && *check.Summary.P95Ms > f.maxP95 {
+		return exitcode.Verdictf("p95 %dms is above the %dms allowed", *check.Summary.P95Ms, f.maxP95)
+	}
+
 	var failed bool
 
 	switch f.failOn {
@@ -620,6 +744,8 @@ func (f *checkFlags) verdict(check *api.Check) error {
 		failed = check.Summary.Measured > 0 && check.Summary.Down == check.Summary.Measured
 	case "assertion":
 		failed = len(check.FailedAssertions) > 0
+	case "tls-expiring":
+		failed = check.TLS != nil && check.TLS.DaysLeft != nil && *check.TLS.DaysLeft < f.tlsMinDays
 	default:
 		// any-region-down: the server's verdict, which already accounts for
 		// --confirm and failed assertions.

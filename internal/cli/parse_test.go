@@ -7,6 +7,36 @@ import (
 	"github.com/downmonitor/cli/internal/api"
 )
 
+func TestParseJSONAssertion(t *testing.T) {
+	tests := []struct {
+		rule string
+		want api.JSONAssertion
+	}{
+		{`$.status == "ok"`, api.JSONAssertion{Path: "$.status", Op: "==", Value: "ok"}},
+		{`$.count >= 3`, api.JSONAssertion{Path: "$.count", Op: ">=", Value: 3.0}},
+		{`$.count > 3`, api.JSONAssertion{Path: "$.count", Op: ">", Value: 3.0}},
+		{`$.ready != false`, api.JSONAssertion{Path: "$.ready", Op: "!=", Value: false}},
+		{`$.items exists`, api.JSONAssertion{Path: "$.items", Op: "exists"}},
+		{`$.error not exists`, api.JSONAssertion{Path: "$.error", Op: "not exists"}},
+		{`$.id`, api.JSONAssertion{Path: "$.id", Op: "exists"}},
+		{`$.value == null`, api.JSONAssertion{Path: "$.value", Op: "==", Value: nil}},
+		{`$.version == v2`, api.JSONAssertion{Path: "$.version", Op: "==", Value: "v2"}},
+	}
+
+	for _, tt := range tests {
+		got, err := parseJSONAssertion(tt.rule)
+		if err != nil {
+			t.Errorf("%s: %v", tt.rule, err)
+
+			continue
+		}
+
+		if !reflect.DeepEqual(got, tt.want) {
+			t.Errorf("%s: got %+v, want %+v", tt.rule, got, tt.want)
+		}
+	}
+}
+
 func TestParseHeaders(t *testing.T) {
 	headers, err := parseHeaders([]string{"X-One: 1", "X-Two:two: parts", "Empty:"})
 	if err != nil {

@@ -111,6 +111,88 @@ func TestCheckUpExitsZeroAndPrintsEveryRegion(t *testing.T) {
 	}
 }
 
+func TestCheckSendsWhatTheFlagsAskedFor(t *testing.T) {
+	server := serve(t, http.StatusCreated, fixture(t, "check_up.json"))
+
+	code, _, stderr := run(t,
+		"check", "https://api.acme.com/v1/orders",
+		"-X", "post",
+		"--json", `{"sku":"A-1"}`,
+		"-H", "X-Api-Version: 2026-09-01",
+		"--bearer", "target-token",
+		"-r", "cdg,nyc",
+		"--exclude", "nyc",
+		"--confirm", "2",
+		"--expect-status", "201",
+		"--expect-body", "pending",
+		"--expect-json", `$.order.state == "pending"`,
+		"--max-ttfb", "400",
+		"--timeout", "20s",
+		"--no-follow", "--insecure", "-4",
+		"--resolve", "api.acme.com:443:203.0.113.10",
+		"--api-url", server.URL, "--key", "dm_live_test",
+	)
+
+	if code != exitcode.OK {
+		t.Fatalf("exit code = %d: %s", code, stderr)
+	}
+
+	body := server.bodies[0]
+
+	if body["method"] != "POST" {
+		t.Errorf("method = %v, want POST (upper-cased for us)", body["method"])
+	}
+
+	if body["confirm"].(float64) != 2 {
+		t.Errorf("confirm = %v", body["confirm"])
+	}
+
+	if body["timeout_seconds"].(float64) != 20 {
+		t.Errorf("timeout_seconds = %v", body["timeout_seconds"])
+	}
+
+	if body["follow_redirects"] != false || body["verify_tls"] != false {
+		t.Errorf("--no-follow and --insecure did not travel: %v", body)
+	}
+
+	if body["ip_version"].(float64) != 4 {
+		t.Errorf("ip_version = %v", body["ip_version"])
+	}
+
+	if body["resolve"] != "api.acme.com:443:203.0.113.10" {
+		t.Errorf("resolve = %v", body["resolve"])
+	}
+
+	headers := body["headers"].(map[string]any)
+	if headers["X-Api-Version"] != "2026-09-01" {
+		t.Errorf("header did not travel: %v", headers)
+	}
+
+	// --json sets Content-Type and Accept unless they were given explicitly.
+	if headers["Content-Type"] != "application/json" {
+		t.Errorf("--json did not set Content-Type: %v", headers)
+	}
+
+	if auth := body["auth"].(map[string]any); auth["token"] != "target-token" || auth["type"] != "bearer" {
+		t.Errorf("auth = %v", auth)
+	}
+
+	assertions := body["assertions"].(map[string]any)
+	if assertions["status"] != "201" || assertions["max_ttfb_ms"].(float64) != 400 {
+		t.Errorf("assertions = %v", assertions)
+	}
+
+	rule := assertions["json"].([]any)[0].(map[string]any)
+	if rule["path"] != "$.order.state" || rule["op"] != "==" || rule["value"] != "pending" {
+		t.Errorf("--expect-json was not parsed: %v", rule)
+	}
+
+	// A list of regions is sent as a list; a group name as a string.
+	if _, isList := body["regions"].([]any); !isList {
+		t.Errorf("regions = %v, want a list", body["regions"])
+	}
+}
+
 func TestWithNoRegionTheAPIPicksThem(t *testing.T) {
 	server := serve(t, http.StatusCreated, fixture(t, "check_up.json"))
 
@@ -462,6 +544,21 @@ func TestSaveWritesTheReadingAndIDFetchesItBack(t *testing.T) {
 	}
 }
 
+func TestMaxP95FailsTheCheckWithoutTouchingTheVerdict(t *testing.T) {
+	server := serve(t, http.StatusCreated, fixture(t, "check_up.json"))
+
+	code, _, stderr := run(t, "check", "https://api.acme.com", "--max-p95", "800",
+		"--api-url", server.URL, "--key", "dm_live_test")
+
+	if code != exitcode.Verdict {
+		t.Fatalf("exit code = %d, want %d", code, exitcode.Verdict)
+	}
+
+	if !strings.Contains(stderr, "p95 871ms is above") {
+		t.Errorf("stderr = %q", stderr)
+	}
+}
+
 func TestAnUnknownOutputFormatIsAUsageError(t *testing.T) {
 	code, _, stderr := run(t, "check", "https://api.acme.com", "-o", "yaml", "--key", "dm_live_test")
 
@@ -540,6 +637,18 @@ func TestFailOnAllRegionsDown(t *testing.T) {
 
 	if code != exitcode.OK {
 		t.Fatalf("exit code = %d, want 0", code)
+	}
+}
+
+func TestFailOnTLSExpiring(t *testing.T) {
+	server := serve(t, http.StatusCreated, fixture(t, "check_up.json"))
+
+	// The certificate of the fixture expires in 61 days.
+	code, _, _ := run(t, "check", "https://api.acme.com", "--fail-on", "tls-expiring", "--tls-min-days", "90",
+		"--api-url", server.URL, "--key", "dm_live_test")
+
+	if code != exitcode.Verdict {
+		t.Fatalf("exit code = %d, want %d", code, exitcode.Verdict)
 	}
 }
 
