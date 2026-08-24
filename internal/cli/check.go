@@ -19,6 +19,9 @@ import (
 	"github.com/downmonitor/cli/internal/target"
 )
 
+// retryDelay is the pause between two attempts of --retries.
+const retryDelay = 5 * time.Second
+
 // maxRegions is the largest --count the API accepts.
 const maxRegions = 24
 
@@ -62,6 +65,7 @@ type checkFlags struct {
 
 	failOn        string
 	failOpen      bool
+	retries       int
 	save          string
 	id            string
 	baseline      string
@@ -133,7 +137,7 @@ Assertions are evaluated by the probes.`,
 
 			a.spinner.Start(checkingText(request))
 
-			check, err := client.Check(cmd.Context(), request)
+			check, err := a.runWithRetries(cmd, client, request, f.retries)
 			if err != nil {
 				return a.forgive(withWhereHints(err, request, f.failOpen), f.failOpen)
 			}
@@ -185,6 +189,7 @@ func bindCheckFlags(cmd *cobra.Command, f *checkFlags) {
 
 	flags.StringVar(&f.failOn, "fail-on", "any-region-down", "When to exit 1: "+strings.Join(failOnPolicies, ", "))
 	flags.BoolVar(&f.failOpen, "fail-open", false, "Exit 0 with a warning instead of 3 when nothing could be checked")
+	flags.IntVar(&f.retries, "retries", 0, "Retry a failing check this many times, 5s apart")
 	flags.StringVar(&f.save, "save", "", "Also write the full result as JSON to this file")
 	flags.StringVar(&f.id, "id", "", "Fetch a previous check by id instead of running one")
 	flags.StringVar(&f.baseline, "baseline", "", "A result saved with --save to compare the p95 against")
@@ -195,7 +200,7 @@ func bindCheckFlags(cmd *cobra.Command, f *checkFlags) {
 		"follow", "no-follow", "timeout", "ipv4", "ipv6", "insecure", "user-agent")
 	inSection(flags, sectionAssertions, "expect-status", "expect-body", "expect-missing", "expect-json",
 		"expect-header", "max-ttfb", "max-total", "max-p95", "tls-min-days")
-	inSection(flags, sectionVerdict, "confirm", "fail-on", "fail-open", "save", "id",
+	inSection(flags, sectionVerdict, "confirm", "fail-on", "fail-open", "retries", "save", "id",
 		"baseline", "max-regression")
 }
 
@@ -700,6 +705,37 @@ func jsonValue(raw string) any {
 	}
 
 	return raw
+}
+
+// runWithRetries runs the check, and runs it again up to retries times while
+// it does not pass. Only verdicts are retried: an API error is returned at
+// once.
+func (a *app) runWithRetries(cmd *cobra.Command, client *api.Client, request api.CheckRequest, retries int) (*api.Check, error) {
+	for attempt := 0; ; attempt++ {
+		check, err := client.Check(cmd.Context(), request)
+		if err != nil {
+			return nil, err
+		}
+
+		if check.Passed || attempt >= retries {
+			return check, nil
+		}
+
+		a.warn(fmt.Sprintf("%s did not pass (%s), retrying in %s (%d of %d)",
+			check.Target, check.Verdict, retryDelay, attempt+1, retries))
+
+		timer := time.NewTimer(retryDelay)
+
+		select {
+		case <-cmd.Context().Done():
+			timer.Stop()
+
+			return check, nil
+		case <-timer.C:
+		}
+
+		a.spinner.Start(checkingText(request))
+	}
 }
 
 // finishCheck prints the result, saves it if requested, and returns the error
