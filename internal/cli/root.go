@@ -84,6 +84,21 @@ func (a *app) clientFor(kind api.Kind) (*api.Client, error) {
 	return api.New(a.cfg.BaseURL, credential.Token), nil
 }
 
+// clientForAny returns a client authenticated with whichever credential is
+// available.
+func (a *app) clientForAny() (*api.Client, error) {
+	kind, credential, ok := a.cfg.Any()
+	if !ok {
+		return nil, exitcode.Unreachablef(
+			"no credential found. Run `downmonitor login`, or set %s", api.KindChecks.EnvVar(),
+		)
+	}
+
+	a.debugf("using %s from %s", kind.Describe(), credential.Source)
+
+	return api.New(a.cfg.BaseURL, credential.Token), nil
+}
+
 func (a *app) renderOptions() render.Options {
 	return render.Options{Color: a.color, Quiet: a.quiet}
 }
@@ -206,7 +221,7 @@ a CI pipeline, with an exit code scripts can rely on.
 Without --regions, a check runs from two regions picked among those with a
 probe in service, on two continents when possible. Name regions with
 --regions cdg,nyc (or a city: --regions paris), or narrow the pick with
---country FR or --continent EU.
+--country FR or --continent EU. ` + "`downmonitor regions`" + ` lists them.
 
 Exit codes
   0  up, and every assertion passed
@@ -214,7 +229,8 @@ Exit codes
   2  usage error: unknown flag or region, unreadable file
   3  nothing was checked: API unreachable, credential rejected, no probe available`,
 		Example: `  downmonitor check https://example.com
-  downmonitor check https://example.com --country FR --count 3`,
+  downmonitor check https://example.com --country FR --count 3
+  downmonitor regions`,
 		Version:       Version,
 		SilenceUsage:  true,
 		SilenceErrors: true,
@@ -259,7 +275,7 @@ Exit codes
 		&cobra.Group{ID: "checks", Title: "Checks"},
 	)
 
-	for _, command := range []*cobra.Command{newCheckCommand(a)} {
+	for _, command := range []*cobra.Command{newCheckCommand(a), newRegionsCommand(a)} {
 		command.GroupID = "checks"
 		root.AddCommand(command)
 	}
