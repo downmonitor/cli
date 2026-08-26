@@ -29,8 +29,12 @@ import (
 // Version is the CLI version, set by main at start-up.
 var Version = "dev"
 
-// keychainGet reads the credential store. Tests replace it.
-var keychainGet = keychain.Get
+// The credential store, as variables so tests can replace it.
+var (
+	keychainGet    = keychain.Get
+	keychainSet    = keychain.Set
+	keychainDelete = keychain.Delete
+)
 
 // app holds the state shared by every command, resolved once in
 // PersistentPreRunE.
@@ -228,7 +232,8 @@ Exit codes
   1  down, or an assertion failed
   2  usage error: unknown flag or region, unreadable file
   3  nothing was checked: API unreachable, credential rejected, no probe available`,
-		Example: `  downmonitor check https://example.com
+		Example: `  downmonitor login
+  downmonitor check https://example.com
   downmonitor check https://example.com --country FR --count 3
   downmonitor regions`,
 		Version:       Version,
@@ -273,10 +278,16 @@ Exit codes
 
 	root.AddGroup(
 		&cobra.Group{ID: "checks", Title: "Checks"},
+		&cobra.Group{ID: "account", Title: "Account"},
 	)
 
 	for _, command := range []*cobra.Command{newCheckCommand(a), newRegionsCommand(a)} {
 		command.GroupID = "checks"
+		root.AddCommand(command)
+	}
+
+	for _, command := range []*cobra.Command{newLoginCommand(a), newLogoutCommand(a), newWhoamiCommand(a)} {
+		command.GroupID = "account"
 		root.AddCommand(command)
 	}
 
