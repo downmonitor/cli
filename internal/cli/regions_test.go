@@ -61,6 +61,20 @@ func TestRegionsJSONIsTheAPIResponse(t *testing.T) {
 	}
 }
 
+func TestCompletionScripts(t *testing.T) {
+	for _, shell := range []string{"bash", "zsh", "fish", "powershell"} {
+		code, stdout, stderr := run(t, "completion", shell)
+
+		if code != exitcode.OK || !strings.Contains(stdout, "downmonitor") {
+			t.Errorf("%s: exit code = %d, %d bytes: %s", shell, code, len(stdout), stderr)
+		}
+	}
+
+	if code, _, _ := run(t, "completion", "tcsh"); code != exitcode.Usage {
+		t.Errorf("an unsupported shell was accepted: exit code %d", code)
+	}
+}
+
 func TestHelpGroupsFlagsInSections(t *testing.T) {
 	_, stdout, _ := run(t, "check", "--help")
 

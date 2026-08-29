@@ -293,6 +293,8 @@ Exit codes
 		root.AddCommand(command)
 	}
 
+	root.AddCommand(newCompletionCommand())
+
 	// Accept the spellings people commonly try first.
 	root.SetGlobalNormalizationFunc(func(_ *pflag.FlagSet, name string) pflag.NormalizedName {
 		switch name {
