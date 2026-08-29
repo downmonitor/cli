@@ -231,10 +231,12 @@ Exit codes
   0  up, and every assertion passed
   1  down, or an assertion failed
   2  usage error: unknown flag or region, unreadable file
-  3  nothing was checked: API unreachable, credential rejected, no probe available`,
+  3  nothing was checked: API unreachable, credential rejected, no probe available
+  4  watch --until did not succeed within --timeout-until`,
 		Example: `  downmonitor login
   downmonitor check https://example.com
   downmonitor check https://example.com --country FR --count 3
+  downmonitor watch https://example.com -i 15s
   downmonitor regions`,
 		Version:       Version,
 		SilenceUsage:  true,
@@ -281,7 +283,7 @@ Exit codes
 		&cobra.Group{ID: "account", Title: "Account"},
 	)
 
-	for _, command := range []*cobra.Command{newCheckCommand(a), newRegionsCommand(a)} {
+	for _, command := range []*cobra.Command{newCheckCommand(a), newWatchCommand(a), newRegionsCommand(a)} {
 		command.GroupID = "checks"
 		root.AddCommand(command)
 	}
