@@ -1,0 +1,87 @@
+# Builds the release: static binaries for six platforms, checksums and their
+# signature, the Homebrew formula and the container image.
+version: 2
+
+project_name: downmonitor
+
+before:
+  hooks:
+    - go mod tidy
+    - go test ./...
+
+builds:
+  - id: downmonitor
+    main: ./cmd/downmonitor
+    binary: downmonitor
+    env: [CGO_ENABLED=0]
+    flags: [-trimpath]
+    ldflags:
+      - -s -w -X main.version={{ .Version }}
+    goos: [darwin, linux, windows]
+    goarch: [amd64, arm64]
+
+# Archive names carry no version, so install.sh can download
+# releases/latest/download/downmonitor_<os>_<arch>.tar.gz directly.
+archives:
+  - name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    files: [README.md, LICENSE]
+
+checksum:
+  name_template: checksums.txt
+
+# Keyless signature of the checksum file with cosign (Sigstore).
+signs:
+  - cmd: cosign
+    args: ["sign-blob", "--yes", "--output-signature=${signature}", "${artifact}"]
+    artifacts: checksum
+
+# The tap lives in another repository, which GITHUB_TOKEN cannot write to.
+# Without HOMEBREW_TAP_TOKEN the formula is built but not pushed.
+brews:
+  - name: downmonitor
+    skip_upload: '{{ if index .Env "HOMEBREW_TAP_TOKEN" }}false{{ else }}true{{ end }}'
+    repository:
+      owner: DownMonitor
+      name: homebrew-tap
+      token: '{{ index .Env "HOMEBREW_TAP_TOKEN" }}'
+    homepage: https://downmonitor.io
+    description: Check your endpoints from Downmonitor's probe network
+    license: MIT
+    test: |
+      system "#{bin}/downmonitor", "--version"
+
+dockers:
+  - image_templates:
+      - ghcr.io/downmonitor/cli:{{ .Version }}
+      - ghcr.io/downmonitor/cli:{{ .Major }}.{{ .Minor }}
+      - ghcr.io/downmonitor/cli:{{ .Major }}
+      - ghcr.io/downmonitor/cli:latest
+    dockerfile: Dockerfile
+    build_flag_templates:
+      - --label=org.opencontainers.image.source=https://github.com/DownMonitor/cli
+      - --label=org.opencontainers.image.version={{ .Version }}
+
+changelog:
+  use: github
+  sort: asc
+  filters:
+    exclude:
+      - "^docs"
+      - "^test"
+      - "^chore"
+      - "^ci"
+
+# install.sh is attached to every release; get.downmonitor.io redirects to the
+# latest one.
+release:
+  github:
+    owner: DownMonitor
+    name: cli
+  extra_files:
+    - glob: ./install.sh
+  footer: |
+    Documentation: https://downmonitor.io/docs/cli

@@ -1,2 +1,11 @@
+# Build output
 /dist/
 *.test
+coverage.out
+
+# Local files, never committed
+/.local/
+.env
+.DS_Store
+.idea/
+.vscode/
