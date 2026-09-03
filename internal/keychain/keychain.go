@@ -3,7 +3,9 @@
 // Linux.
 //
 // It shells out to the tools the system ships rather than linking against
-// native libraries, which keeps the binary static and free of cgo.
+// native libraries, which keeps the binary static and free of cgo. Tokens are
+// always passed on stdin, never as command-line arguments, so they do not show
+// up in the process list.
 //
 // When no store is available, nothing is written to disk as a fallback:
 // callers are expected to point the user at environment variables instead.
@@ -52,9 +54,12 @@ func Account(profile, kind string) string {
 func Set(account, token string) error {
 	switch runtime.GOOS {
 	case "darwin":
-		// -U updates an existing item instead of failing.
-		return run(exec.Command("security", "add-generic-password",
-			"-U", "-s", service, "-a", account, "-w", token), "")
+		// `security -i` reads commands from stdin, which keeps the token out of
+		// argv. -U updates an existing item instead of failing.
+		command := fmt.Sprintf("add-generic-password -U -s %s -a %s -w %s\n",
+			quote(service), quote(account), quote(token))
+
+		return run(exec.Command("security", "-i"), command)
 	case "linux":
 		if !hasSecretTool() {
 			return ErrUnavailable
@@ -172,4 +177,10 @@ func firstLine(out []byte) string {
 	line, _, _ := strings.Cut(text, "\n")
 
 	return line
+}
+
+// quote wraps value in double quotes for the `security -i` command parser,
+// escaping backslashes and double quotes.
+func quote(value string) string {
+	return `"` + strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(value) + `"`
 }

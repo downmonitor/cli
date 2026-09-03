@@ -20,6 +20,21 @@ func TestAccount(t *testing.T) {
 	}
 }
 
+func TestQuote(t *testing.T) {
+	tests := map[string]string{
+		"dm_live_abc": `"dm_live_abc"`,
+		`a"b`:         `"a\"b"`,
+		`a\b`:         `"a\\b"`,
+		"with space":  `"with space"`,
+	}
+
+	for in, want := range tests {
+		if got := quote(in); got != want {
+			t.Errorf("quote(%q) = %s, want %s", in, got, want)
+		}
+	}
+}
+
 func TestFirstLine(t *testing.T) {
 	if got := firstLine([]byte("  first\nsecond\n")); got != "first" {
 		t.Errorf("firstLine = %q", got)
