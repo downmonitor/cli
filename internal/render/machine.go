@@ -156,32 +156,40 @@ func writeGitHub(w io.Writer, check *api.Check) error {
 }
 
 // annotate writes a GitHub Actions workflow command such as
-// "::error title=...::message".
+// "::error title=...::message", escaping values as the runner expects.
 func annotate(w io.Writer, level, title, message string) {
-	fmt.Fprintf(w, "::%s title=%s::%s\n", level, title, message)
+	fmt.Fprintf(w, "::%s title=%s::%s\n", level, escapeProperty(title), escapeData(message))
 }
+
+var (
+	dataEscaper     = strings.NewReplacer("%", "%25", "\r", "%0D", "\n", "%0A")
+	propertyEscaper = strings.NewReplacer("%", "%25", "\r", "%0D", "\n", "%0A", ":", "%3A", ",", "%2C")
+)
+
+func escapeData(value string) string     { return dataEscaper.Replace(value) }
+func escapeProperty(value string) string { return propertyEscaper.Replace(value) }
 
 // writeMarkdown writes the result as a Markdown table, for pull request
 // comments and job summaries.
 func writeMarkdown(w io.Writer, check *api.Check) error {
 	var out strings.Builder
 
-	fmt.Fprintf(&out, "**%s** — %s\n\n", check.Target, check.Verdict)
+	fmt.Fprintf(&out, "**%s** — %s\n\n", cell(check.Target), check.Verdict)
 	out.WriteString("| region | status | ttfb | total | verdict |\n| --- | --- | --- | --- | --- |\n")
 
 	for _, region := range check.Regions {
 		if !region.Measured {
-			fmt.Fprintf(&out, "| %s | — | — | — | not measured |\n", place(region))
+			fmt.Fprintf(&out, "| %s | — | — | — | not measured |\n", cell(place(region)))
 
 			continue
 		}
 
 		fmt.Fprintf(&out, "| %s | %s | %s | %s | %s |\n",
-			place(region),
-			status(region),
+			cell(place(region)),
+			cell(status(region)),
 			ms(region.Timings.TTFBMs),
 			ms(region.Timings.TotalMs),
-			deref(region.Verdict),
+			cell(deref(region.Verdict)),
 		)
 	}
 
@@ -202,6 +210,11 @@ func writeMarkdown(w io.Writer, check *api.Check) error {
 	_, err := io.WriteString(w, out.String())
 
 	return err
+}
+
+// cell escapes a value for use inside a Markdown table.
+func cell(value string) string {
+	return strings.NewReplacer("|", `\|`, "\n", " ").Replace(value)
 }
 
 func seconds(region api.RegionReading) float64 {

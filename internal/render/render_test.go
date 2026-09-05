@@ -272,6 +272,19 @@ func stripEscapes(text string) string {
 	return out.String()
 }
 
+func TestGitHubEscapesAnnotations(t *testing.T) {
+	check := load(t)
+	down := "down"
+	check.Regions[0].Verdict = &down
+	check.Regions[0].Error = &api.ReadingErr{Code: "HTTP_500", Message: "100% broken\nsecond line"}
+
+	out := render(t, GitHub, check)
+
+	if !strings.Contains(out, "::error title=cdg is down::100%25 broken%0Asecond line\n") {
+		t.Errorf("the annotation is not escaped:\n%s", out)
+	}
+}
+
 func TestGitHubWritesTheStepSummary(t *testing.T) {
 	summary := filepath.Join(t.TempDir(), "summary.md")
 	t.Setenv("GITHUB_STEP_SUMMARY", summary)
@@ -285,6 +298,15 @@ func TestGitHubWritesTheStepSummary(t *testing.T) {
 
 	if !strings.Contains(string(written), "| region | status |") {
 		t.Errorf("summary = %q", written)
+	}
+}
+
+func TestMarkdownEscapesPipes(t *testing.T) {
+	check := load(t)
+	check.Regions[0].Name = "Paris | Saclay"
+
+	if out := render(t, Markdown, check); !strings.Contains(out, `Paris \| Saclay`) {
+		t.Errorf("the pipe was not escaped:\n%s", out)
 	}
 }
 
