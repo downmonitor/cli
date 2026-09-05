@@ -44,7 +44,7 @@ func writeTable(w io.Writer, check *api.Check, options Options) error {
 		}
 
 		verdict := deref(region.Verdict)
-		timings := region.Timings
+		timings := timingsOf(region)
 
 		row := []string{
 			ui.Dot(verdict, color),
@@ -195,7 +195,7 @@ func longestTotal(check *api.Check) int {
 // spans barWidth columns. TTFB is measured from the start of the request, so
 // the wait phase is what remains once DNS, connect and TLS are subtracted.
 func waterfall(timings *api.Timings, longest int) string {
-	if timings == nil || timings.TotalMs == nil || longest <= 0 {
+	if timings.TotalMs == nil || longest <= 0 {
 		return ""
 	}
 

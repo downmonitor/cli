@@ -107,6 +107,16 @@ func ms(value *int) string {
 	return strconv.Itoa(*value) + "ms"
 }
 
+// timingsOf returns the timings of a region, or empty timings when the
+// reading has none.
+func timingsOf(region api.RegionReading) *api.Timings {
+	if region.Timings == nil {
+		return &api.Timings{}
+	}
+
+	return region.Timings
+}
+
 func place(region api.RegionReading) string {
 	return region.Region + " " + region.Name
 }

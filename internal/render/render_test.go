@@ -272,6 +272,19 @@ func stripEscapes(text string) string {
 	return out.String()
 }
 
+func TestAMeasuredRegionWithoutTimingsDoesNotPanic(t *testing.T) {
+	check := load(t)
+	check.Regions[0].Timings = nil
+
+	for _, format := range Formats {
+		var out bytes.Buffer
+
+		if err := Check(&out, format, check, Options{Color: true}); err != nil {
+			t.Errorf("%s: %v", format, err)
+		}
+	}
+}
+
 func TestGitHubEscapesAnnotations(t *testing.T) {
 	check := load(t)
 	down := "down"

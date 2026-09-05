@@ -184,11 +184,13 @@ func writeMarkdown(w io.Writer, check *api.Check) error {
 			continue
 		}
 
+		timings := timingsOf(region)
+
 		fmt.Fprintf(&out, "| %s | %s | %s | %s | %s |\n",
 			cell(place(region)),
 			cell(status(region)),
-			ms(region.Timings.TTFBMs),
-			ms(region.Timings.TotalMs),
+			ms(timings.TTFBMs),
+			ms(timings.TotalMs),
 			cell(deref(region.Verdict)),
 		)
 	}
