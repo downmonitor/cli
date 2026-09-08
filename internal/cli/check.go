@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -111,6 +112,10 @@ Assertions are evaluated by the probes.`,
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := f.validate(); err != nil {
+				return err
+			}
+
 			client, err := a.clientFor(api.KindChecks)
 			if err != nil {
 				return err
@@ -217,6 +222,34 @@ const whereFromHelp = `Where from
 
   ` + "`downmonitor regions`" + ` lists the regions in service. The same settings can
   be stored in a .downmonitor.yml at the root of a repository.`
+
+// validate checks the flags that do not depend on the target, before any
+// request is made.
+func (f *checkFlags) validate() error {
+	if !slices.Contains(failOnPolicies, f.failOn) {
+		return exitcode.Usagef("--fail-on must be one of %s", strings.Join(failOnPolicies, ", "))
+	}
+
+	if f.failOn == "tls-expiring" && f.tlsMinDays <= 0 {
+		return exitcode.Usagef("--fail-on tls-expiring needs --tls-min-days")
+	}
+
+	if f.retries < 0 {
+		return exitcode.Usagef("--retries cannot be negative")
+	}
+
+	if f.maxRegression != "" {
+		if f.baseline == "" {
+			return exitcode.Usagef("--max-regression needs --baseline")
+		}
+
+		if _, err := allowance(0, f.maxRegression); err != nil {
+			return exitcode.Usagef("%s", err)
+		}
+	}
+
+	return nil
+}
 
 // withWhereHints adds advice to a "no probe available" error. The right
 // advice depends on how the regions were selected, which only this command

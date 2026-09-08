@@ -649,6 +649,33 @@ func fmtAny(value any) string {
 	return string(encoded)
 }
 
+func TestInvalidFlagsAreRejectedBeforeAnyCall(t *testing.T) {
+	for _, args := range [][]string{
+		{"--fail-on", "sometimes"},
+		{"--fail-on", "tls-expiring"},
+		{"--max-regression", "50%"},
+		{"--baseline", "base.json", "--max-regression", "a lot"},
+		{"--retries", "-1"},
+		{"--timeout", "500ms"},
+		{"-4", "-6"},
+		{"-d", "a", "--json", "{}"},
+		{"-u", "no-password"},
+		{"-H", "not a header"},
+	} {
+		server := serve(t, http.StatusCreated, fixture(t, "check_up.json"))
+
+		code, _, stderr := run(t, append([]string{"check", "https://api.acme.com", "--api-url", server.URL, "--key", "dm_live_test"}, args...)...)
+
+		if code != exitcode.Usage {
+			t.Errorf("%v: exit code = %d, want %d\n%s", args, code, exitcode.Usage, stderr)
+		}
+
+		if len(server.requests) != 0 {
+			t.Errorf("%v: a request was sent", args)
+		}
+	}
+}
+
 func TestFailOpenNeverForgivesAVerdict(t *testing.T) {
 	server := serve(t, http.StatusCreated, withVerdict(t, "down", false))
 
