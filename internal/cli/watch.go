@@ -57,14 +57,8 @@ waiting and in the final summary.
   downmonitor watch "$DEPLOY_URL" --until up --timeout-until 5m && ./smoke-tests.sh`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if f.interval < minInterval {
-				return exitcode.Usagef("--interval must be at least %s: every reading is a billed check", minInterval)
-			}
-
-			switch f.until {
-			case "", "up", "down", "stable":
-			default:
-				return exitcode.Usagef("--until must be up, down or stable")
+			if err := f.validate(); err != nil {
+				return err
 			}
 
 			client, err := a.clientFor(api.KindChecks)
@@ -96,6 +90,40 @@ waiting and in the final summary.
 	inSection(flags, sectionWatch, "interval", "until", "timeout-until", "readings", "on-change", "bell")
 
 	return cmd
+}
+
+func (f *watchFlags) validate() error {
+	if err := f.check.validate(); err != nil {
+		return err
+	}
+
+	if f.check.id != "" || f.check.save != "" || f.check.baseline != "" || f.check.retries > 0 {
+		return exitcode.Usagef("--id, --save, --baseline and --retries only apply to check")
+	}
+
+	if f.interval < minInterval {
+		return exitcode.Usagef("--interval must be at least %s: every reading is a billed check", minInterval)
+	}
+
+	switch f.until {
+	case "", "up", "down", "stable":
+	default:
+		return exitcode.Usagef("--until must be up, down or stable")
+	}
+
+	if f.timeout < 0 {
+		return exitcode.Usagef("--timeout-until cannot be negative")
+	}
+
+	if f.timeout > 0 && f.until == "" {
+		return exitcode.Usagef("--timeout-until needs --until")
+	}
+
+	if f.readings < 0 {
+		return exitcode.Usagef("--readings cannot be negative")
+	}
+
+	return nil
 }
 
 // watchState is what the loop remembers between readings.
@@ -165,13 +193,20 @@ func (a *app) watch(cmd *cobra.Command, client *api.Client, request api.CheckReq
 			return nil
 		}
 
-		if !deadline.IsZero() && time.Now().After(deadline) {
-			a.watchSummary(state)
+		wait := f.interval
 
-			return exitcode.Timeoutf("--until %s was not met within %s", f.until, f.timeout)
+		if !deadline.IsZero() {
+			left := time.Until(deadline)
+			if left <= 0 {
+				a.watchSummary(state)
+
+				return exitcode.Timeoutf("--until %s was not met within %s", f.until, f.timeout)
+			}
+
+			wait = min(wait, left)
 		}
 
-		if !a.wait(cmd, f.interval, state) {
+		if !a.wait(cmd, wait, state) {
 			a.watchSummary(state)
 
 			return nil
@@ -183,6 +218,9 @@ func (a *app) watch(cmd *cobra.Command, client *api.Client, request api.CheckReq
 // command was interrupted.
 func (a *app) wait(cmd *cobra.Command, d time.Duration, state *watchState) bool {
 	next := time.Now().Add(d)
+
+	timer := time.NewTimer(d)
+	defer timer.Stop()
 
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
@@ -200,10 +238,10 @@ func (a *app) wait(cmd *cobra.Command, d time.Duration, state *watchState) bool 
 		select {
 		case <-cmd.Context().Done():
 			return false
+		case <-timer.C:
+			return true
 		case <-ticker.C:
 			a.spinner.Update(countdown())
-		case <-time.After(time.Until(next)):
-			return true
 		}
 	}
 }

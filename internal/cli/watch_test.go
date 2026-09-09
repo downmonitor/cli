@@ -55,6 +55,28 @@ func TestWatchNDJSONPrintsOneObjectPerReading(t *testing.T) {
 	}
 }
 
+func TestWatchRejectsInvalidFlags(t *testing.T) {
+	for _, args := range [][]string{
+		{"-i", "1s"},
+		{"--until", "sideways"},
+		{"--timeout-until", "1m"},
+		{"--readings", "-1"},
+		{"--save", "out.json"},
+	} {
+		server := serve(t, http.StatusCreated, fixture(t, "check_up.json"))
+
+		code, _, stderr := run(t, append([]string{"watch", "https://api.acme.com", "--api-url", server.URL, "--key", "dm_live_test"}, args...)...)
+
+		if code != exitcode.Usage {
+			t.Errorf("%v: exit code = %d, want %d\n%s", args, code, exitcode.Usage, stderr)
+		}
+
+		if len(server.requests) != 0 {
+			t.Errorf("%v: a request was sent", args)
+		}
+	}
+}
+
 func reading(verdict string, regions map[string]string) *api.Check {
 	check := &api.Check{Verdict: verdict, BilledChecks: len(regions)}
 
