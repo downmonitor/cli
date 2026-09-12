@@ -331,20 +331,15 @@ func (a *app) interactive() bool {
 	return ok && !a.quiet && os.Getenv("CI") == "" && ui.Terminal(file)
 }
 
-// forgive implements --fail-open: when the API reports that nothing was
-// checked, the error becomes a warning. Verdicts and usage errors are never
-// forgiven.
+// forgive implements --fail-open for the error of an API call: when nothing
+// was checked (API unreachable, credential rejected, no probe available) the
+// error becomes a warning. Verdicts and usage errors are never forgiven.
 func (a *app) forgive(err error, failOpen bool) error {
-	if err == nil || !failOpen {
+	if err == nil || !failOpen || exitcode.Of(err) != exitcode.Unreachable {
 		return err
 	}
 
-	var apiErr *api.Error
-	if !errors.As(err, &apiErr) || !apiErr.NothingRan() {
-		return err
-	}
-
-	a.warn(apiErr.Error(), "--fail-open: nothing was checked, so this does not fail the command.")
+	a.warn(err.Error(), "--fail-open: nothing was checked, so this does not fail the command.")
 
 	return nil
 }

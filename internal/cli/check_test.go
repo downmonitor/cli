@@ -676,6 +676,19 @@ func TestInvalidFlagsAreRejectedBeforeAnyCall(t *testing.T) {
 	}
 }
 
+func TestFailOpenForgivesAnUnreachableAPI(t *testing.T) {
+	code, stdout, stderr := run(t, "check", "https://api.acme.com", "--fail-open",
+		"--api-url", "http://127.0.0.1:1", "--key", "dm_live_test")
+
+	if code != exitcode.OK {
+		t.Fatalf("exit code = %d, want 0 with --fail-open", code)
+	}
+
+	if stdout != "" || !strings.Contains(stderr, "--fail-open") {
+		t.Errorf("stdout = %q, stderr = %q", stdout, stderr)
+	}
+}
+
 func TestFailOpenNeverForgivesAVerdict(t *testing.T) {
 	server := serve(t, http.StatusCreated, withVerdict(t, "down", false))
 
