@@ -10,6 +10,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -57,6 +58,14 @@ type Config struct {
 	Profile string
 	File    File
 
+	// FilePath is the .downmonitor.yml in use, if any.
+	FilePath string
+
+	// FileErr is set when a .downmonitor.yml was found but could not be
+	// parsed. The file is then ignored, and the caller decides whether to
+	// warn about it.
+	FileErr error
+
 	flag   string
 	lookup Lookup
 }
@@ -67,7 +76,7 @@ type Config struct {
 func Load(tokenFlag, profileFlag string, lookup Lookup) Config {
 	cfg := Config{flag: tokenFlag, lookup: lookup}
 
-	cfg.File = findFile()
+	cfg.FilePath, cfg.File, cfg.FileErr = findFile()
 	cfg.Profile = firstNonEmpty(profileFlag, os.Getenv("DOWNMONITOR_PROFILE"), "default")
 	cfg.BaseURL = firstNonEmpty(os.Getenv("DOWNMONITOR_API_URL"), cfg.File.APIURL, DefaultBaseURL)
 
@@ -118,26 +127,28 @@ func (c Config) Any() (api.Kind, Credential, bool) {
 
 // findFile looks for .downmonitor.yml in the working directory and its
 // parents, so commands run from a subdirectory still pick up the project
-// defaults. A file that cannot be parsed is ignored.
-func findFile() File {
+// defaults.
+func findFile() (string, File, error) {
 	dir, err := os.Getwd()
 	if err != nil {
-		return File{}
+		return "", File{}, nil //nolint:nilerr // no working directory, so no project file
 	}
 
 	for {
-		if raw, err := os.ReadFile(filepath.Join(dir, FileName)); err == nil {
+		path := filepath.Join(dir, FileName)
+
+		if raw, err := os.ReadFile(path); err == nil {
 			var file File
-			if yaml.Unmarshal(raw, &file) != nil {
-				return File{}
+			if err := yaml.Unmarshal(raw, &file); err != nil {
+				return path, File{}, fmt.Errorf("%s: %w", path, err)
 			}
 
-			return file
+			return path, file, nil
 		}
 
 		parent := filepath.Dir(dir)
 		if parent == dir {
-			return File{}
+			return "", File{}, nil
 		}
 
 		dir = parent

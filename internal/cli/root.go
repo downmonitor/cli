@@ -257,7 +257,15 @@ Exit codes
 				a.cfg.BaseURL = apiURLFlag
 			}
 
+			if a.cfg.FileErr != nil {
+				a.warn("ignoring "+config.FileName+": "+a.cfg.FileErr.Error(), "Fix or remove the file to use its defaults.")
+			}
+
 			a.debugf("api %s · profile %s", a.cfg.BaseURL, a.cfg.Profile)
+
+			if a.cfg.FilePath != "" && a.cfg.FileErr == nil {
+				a.debugf("defaults from %s", a.cfg.FilePath)
+			}
 
 			return nil
 		},

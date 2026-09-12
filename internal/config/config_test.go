@@ -202,6 +202,10 @@ func TestFileIsFoundInParentDirectory(t *testing.T) {
 		t.Errorf("regions = %v", cfg.File.Regions)
 	}
 
+	if cfg.FilePath != filepath.Join(root, FileName) {
+		t.Errorf("FilePath = %q", cfg.FilePath)
+	}
+
 	// The environment wins over the file.
 	if cfg.BaseURL != "https://staging.example/api/v1" {
 		t.Errorf("BaseURL = %q", cfg.BaseURL)
@@ -214,7 +218,7 @@ func TestFileIsFoundInParentDirectory(t *testing.T) {
 	}
 }
 
-func TestInvalidFileIsIgnored(t *testing.T) {
+func TestInvalidFileIsReportedAndIgnored(t *testing.T) {
 	clearEnvironment(t)
 
 	root := t.TempDir()
@@ -229,6 +233,10 @@ func TestInvalidFileIsIgnored(t *testing.T) {
 
 	if len(cfg.File.Regions) != 0 {
 		t.Errorf("a broken file was read: %v", cfg.File.Regions)
+	}
+
+	if cfg.FileErr == nil {
+		t.Error("the parse error was not reported")
 	}
 
 	if cfg.BaseURL != DefaultBaseURL {

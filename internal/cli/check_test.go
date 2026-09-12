@@ -824,6 +824,27 @@ func TestNoProbeAvailableSuggestsWhatToChange(t *testing.T) {
 	}
 }
 
+func TestAnInvalidRepositoryFileIsReported(t *testing.T) {
+	server := serve(t, http.StatusCreated, fixture(t, "check_up.json"))
+	dir := t.TempDir()
+
+	if err := os.WriteFile(filepath.Join(dir, ".downmonitor.yml"), []byte("regions: [oops\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Chdir(dir)
+
+	code, _, stderr := run(t, "check", "https://api.acme.com", "--api-url", server.URL, "--key", "dm_live_test")
+
+	if code != exitcode.OK {
+		t.Fatalf("exit code = %d: %s", code, stderr)
+	}
+
+	if !strings.Contains(stderr, "ignoring .downmonitor.yml") {
+		t.Errorf("no warning about the file:\n%s", stderr)
+	}
+}
+
 func TestVerboseNeverPrintsTheKey(t *testing.T) {
 	server := serve(t, http.StatusCreated, fixture(t, "check_up.json"))
 
