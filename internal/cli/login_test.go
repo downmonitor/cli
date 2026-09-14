@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/downmonitor/cli/internal/exitcode"
 	"github.com/downmonitor/cli/internal/keychain"
@@ -140,6 +141,10 @@ func runLogin(t *testing.T, args ...string) (int, string, string, *fakeStore) {
 
 	store := &fakeStore{}
 	store.install(t)
+
+	previousStep := slowDownStep
+	slowDownStep = 10 * time.Millisecond
+	t.Cleanup(func() { slowDownStep = previousStep })
 
 	t.Setenv("DOWNMONITOR_API_KEY", "")
 	t.Setenv("DOWNMONITOR_TOKEN", "")

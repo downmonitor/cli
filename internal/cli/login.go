@@ -17,6 +17,10 @@ import (
 	"github.com/downmonitor/cli/internal/ui"
 )
 
+// slowDownStep is how much the polling interval grows on a slow_down
+// response, as required by RFC 8628 section 3.5.
+var slowDownStep = 5 * time.Second
+
 // newLoginCommand signs in with the OAuth 2.0 device authorization grant
 // (RFC 8628) and stores the issued credentials in the OS keychain.
 //
@@ -150,7 +154,7 @@ func (a *app) pollUntilApproved(cmd *cobra.Command, client *api.Client, authoriz
 		switch apiErr.Code {
 		case "authorization_pending":
 		case "slow_down":
-			interval += time.Second
+			interval += slowDownStep
 		case "access_denied":
 			return nil, exitcode.Unreachablef("the login was denied in the browser")
 		case "expired_token":
