@@ -16,6 +16,7 @@ func TestParseJSONAssertion(t *testing.T) {
 		{`$.count >= 3`, api.JSONAssertion{Path: "$.count", Op: ">=", Value: 3.0}},
 		{`$.count > 3`, api.JSONAssertion{Path: "$.count", Op: ">", Value: 3.0}},
 		{`$.ready != false`, api.JSONAssertion{Path: "$.ready", Op: "!=", Value: false}},
+		{`$.name contains 'a==b'`, api.JSONAssertion{Path: "$.name", Op: "contains", Value: "a==b"}},
 		{`$.items exists`, api.JSONAssertion{Path: "$.items", Op: "exists"}},
 		{`$.error not exists`, api.JSONAssertion{Path: "$.error", Op: "not exists"}},
 		{`$.id`, api.JSONAssertion{Path: "$.id", Op: "exists"}},
@@ -33,6 +34,14 @@ func TestParseJSONAssertion(t *testing.T) {
 
 		if !reflect.DeepEqual(got, tt.want) {
 			t.Errorf("%s: got %+v, want %+v", tt.rule, got, tt.want)
+		}
+	}
+}
+
+func TestParseJSONAssertionRejectsInvalidRules(t *testing.T) {
+	for _, rule := range []string{"", "status == ok", "$.a ==", "$.a exists now", "$.a b"} {
+		if got, err := parseJSONAssertion(rule); err == nil {
+			t.Errorf("%q was accepted as %+v", rule, got)
 		}
 	}
 }

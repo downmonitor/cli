@@ -661,6 +661,7 @@ func TestInvalidFlagsAreRejectedBeforeAnyCall(t *testing.T) {
 		{"-d", "a", "--json", "{}"},
 		{"-u", "no-password"},
 		{"-H", "not a header"},
+		{"--expect-json", "status == ok"},
 	} {
 		server := serve(t, http.StatusCreated, fixture(t, "check_up.json"))
 

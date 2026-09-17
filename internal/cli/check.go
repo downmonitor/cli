@@ -684,36 +684,59 @@ func parseHeaders(values []string) (map[string]string, error) {
 	return headers, nil
 }
 
-// jsonOperators are the operators of --expect-json, tried in order.
+// jsonOperators are the operators of --expect-json. When several match, the
+// leftmost wins, and the longest among those starting at the same position.
 var jsonOperators = []string{"==", "!=", ">=", "<=", ">", "<", " contains ", " not exists", " exists"}
 
 // parseJSONAssertion parses rules such as `$.order.state == "pending"`,
 // `$.items exists` or a bare `$.id`, which means exists.
 func parseJSONAssertion(rule string) (api.JSONAssertion, error) {
 	trimmed := strings.TrimSpace(rule)
+	index, operator := -1, ""
 
-	for _, operator := range jsonOperators {
-		index := strings.Index(trimmed, operator)
-		if index <= 0 {
+	for _, candidate := range jsonOperators {
+		at := strings.Index(trimmed, candidate)
+		if at <= 0 {
 			continue
 		}
 
-		op := strings.TrimSpace(operator)
-		assertion := api.JSONAssertion{Path: strings.TrimSpace(trimmed[:index]), Op: op}
+		if index == -1 || at < index || (at == index && len(candidate) > len(operator)) {
+			index, operator = at, candidate
+		}
+	}
 
-		if op != "exists" && op != "not exists" {
-			assertion.Value = jsonValue(strings.TrimSpace(trimmed[index+len(operator):]))
+	if index == -1 {
+		if strings.HasPrefix(trimmed, "$") && !strings.ContainsAny(trimmed, " \t") {
+			return api.JSONAssertion{Path: trimmed, Op: "exists"}, nil
+		}
+
+		return api.JSONAssertion{}, exitcode.Usagef(
+			`invalid --expect-json %q: expected a path and a rule, such as '$.status == "ok"' or '$.items exists'`, rule)
+	}
+
+	op := strings.TrimSpace(operator)
+	assertion := api.JSONAssertion{Path: strings.TrimSpace(trimmed[:index]), Op: op}
+	rest := strings.TrimSpace(trimmed[index+len(operator):])
+
+	if !strings.HasPrefix(assertion.Path, "$") {
+		return api.JSONAssertion{}, exitcode.Usagef("invalid --expect-json %q: the path must start with $", rule)
+	}
+
+	if op == "exists" || op == "not exists" {
+		if rest != "" {
+			return api.JSONAssertion{}, exitcode.Usagef("invalid --expect-json %q: %s takes no value", rule, op)
 		}
 
 		return assertion, nil
 	}
 
-	if strings.HasPrefix(trimmed, "$") {
-		return api.JSONAssertion{Path: trimmed, Op: "exists"}, nil
+	if rest == "" {
+		return api.JSONAssertion{}, exitcode.Usagef("invalid --expect-json %q: missing a value after %s", rule, op)
 	}
 
-	return api.JSONAssertion{}, exitcode.Usagef(
-		`invalid --expect-json %q: expected a path and a rule, such as '$.status == "ok"' or '$.items exists'`, rule)
+	assertion.Value = jsonValue(rest)
+
+	return assertion, nil
 }
 
 // jsonValue keeps the type of the value as written: a quoted string stays a
