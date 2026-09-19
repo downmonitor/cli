@@ -1,7 +1,11 @@
 package ui
 
 import (
+	"bytes"
+	"strings"
+	"sync"
 	"testing"
+	"time"
 )
 
 func TestWidthIgnoresEscapeCodes(t *testing.T) {
@@ -86,5 +90,45 @@ func TestColorWanted(t *testing.T) {
 
 	if ColorWanted(false, nil) {
 		t.Error("NO_COLOR was ignored")
+	}
+}
+
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	return b.buf.Write(p)
+}
+
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	return b.buf.String()
+}
+
+func TestSpinnerDrawsAndErasesItself(t *testing.T) {
+	var out syncBuffer
+
+	spinner := NewSpinner(&out, true, false)
+	spinner.Start("checking")
+	spinner.Update("still checking")
+	time.Sleep(100 * time.Millisecond)
+	spinner.Stop()
+	spinner.Stop()
+
+	written := out.String()
+
+	if !strings.Contains(written, "checking") {
+		t.Errorf("the spinner never drew its text: %q", written)
+	}
+
+	if !strings.HasSuffix(written, "\r\033[2K\033[?25h") {
+		t.Errorf("the spinner did not erase itself and restore the cursor: %q", written)
 	}
 }
