@@ -14,11 +14,10 @@ test:
 	go test -race ./...
 
 lint:
-	@test -z "$$(gofmt -l .)" || (echo "gofmt:"; gofmt -l .; exit 1)
-	go vet ./...
+	golangci-lint run ./...
 
 fmt:
-	gofmt -w .
+	golangci-lint fmt ./...
 
 run: build
 	./dist/$(BINARY) $(ARGS)
