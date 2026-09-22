@@ -40,9 +40,10 @@ signs:
     artifacts: checksum
 
 # The tap lives in another repository, which GITHUB_TOKEN cannot write to.
-# Without HOMEBREW_TAP_TOKEN the formula is built but not pushed.
-brews:
+# Without HOMEBREW_TAP_TOKEN the cask is built but not pushed.
+homebrew_casks:
   - name: downmonitor
+    binaries: [downmonitor]
     skip_upload: '{{ if index .Env "HOMEBREW_TAP_TOKEN" }}false{{ else }}true{{ end }}'
     repository:
       owner: DownMonitor
@@ -51,19 +52,27 @@ brews:
     homepage: https://downmonitor.io
     description: Check your endpoints from Downmonitor's probe network
     license: MIT
-    test: |
-      system "#{bin}/downmonitor", "--version"
+    # The binaries are not notarized: remove the quarantine attribute so
+    # Gatekeeper does not block them.
+    hooks:
+      post:
+        install: |
+          if system_command("/usr/bin/xattr", args: ["-h"]).exit_status == 0
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/downmonitor"]
+          end
 
-dockers:
-  - image_templates:
-      - ghcr.io/downmonitor/cli:{{ .Version }}
-      - ghcr.io/downmonitor/cli:{{ .Major }}.{{ .Minor }}
-      - ghcr.io/downmonitor/cli:{{ .Major }}
-      - ghcr.io/downmonitor/cli:latest
-    dockerfile: Dockerfile
-    build_flag_templates:
-      - --label=org.opencontainers.image.source=https://github.com/DownMonitor/cli
-      - --label=org.opencontainers.image.version={{ .Version }}
+dockers_v2:
+  - images: [ghcr.io/downmonitor/cli]
+    tags:
+      - "{{ .Version }}"
+      - "{{ .Major }}.{{ .Minor }}"
+      - "{{ .Major }}"
+      - latest
+    platforms: [linux/amd64, linux/arm64]
+    labels:
+      org.opencontainers.image.source: https://github.com/DownMonitor/cli
+      org.opencontainers.image.version: "{{ .Version }}"
+      org.opencontainers.image.licenses: MIT
 
 changelog:
   use: github
