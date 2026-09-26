@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/DownMonitor/cli/security/advisories/new
+    about: Please report security issues privately.
+  - name: Downmonitor documentation
+    url: https://downmonitor.io/docs/cli
+    about: Usage of the CLI and the API.
